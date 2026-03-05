@@ -7,7 +7,7 @@ import MessageList from "./MessageList";
 import ChatInput from "./ChatInput";
 import { Message, Conversation, SSEEvent } from "./types";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const SS_CONVS_KEY   = "agentui:conversations";
 const SS_MSGS_PREFIX = "agentui:messages:";
 

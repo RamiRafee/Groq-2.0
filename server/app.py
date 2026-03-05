@@ -817,9 +817,48 @@ def serialise_ai_message_chunk(chunk):
  """
 @app.get("/chat_stream/{message}")
 async def chat_stream(message: str, checkpoint_id: Optional[str] = Query(None)):
+    """Stream agent responses as Server-Sent Events.
+
+    Args:
+        message: The user's message, provided as a URL path segment.
+        checkpoint_id: Optional query parameter.  Omit on the first turn;
+            pass the value received in the ``session`` event on all subsequent
+            turns to continue the same conversation thread.
+
+    Returns:
+        A ``StreamingResponse`` with ``Content-Type: text/event-stream``.
+        Each chunk is a JSON-encoded SSE event.  See ``generate_chat_responses``
+        for the full event catalogue.
+
+    Example:
+        First turn (new conversation)::
+
+            GET /chat_stream/Hello
+
+            data: {"type": "session", "checkpoint_id": "abc-123"}
+            data: {"type": "thinking", "stage": "reasoning"}
+            data: {"type": "content", "content": "Hi!", "index": 0}
+            data: {"type": "end"}
+
+        Follow-up turn (existing conversation)::
+
+            GET /chat_stream/How%20are%20you?checkpoint_id=abc-123
+
+            data: {"type": "thinking", "stage": "reasoning"}
+            data: {"type": "content", "content": "I'm doing well.", "index": 0}
+            data: {"type": "end"}
+    """
     return StreamingResponse(
-        generate_chat_responses(message, checkpoint_id), 
-        media_type="text/event-stream"
+        generate_chat_responses(message, checkpoint_id),
+        media_type="text/event-stream",
+        headers={
+            # Prevent proxies / nginx from buffering the stream
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            # Allow the client to read the checkpoint_id header directly
+            # (useful if you later choose to surface it as a response header)
+            "Access-Control-Expose-Headers": "Content-Type",
+        },
     )
 
 

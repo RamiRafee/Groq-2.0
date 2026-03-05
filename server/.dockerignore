@@ -1,0 +1,9 @@
+venv
+.vscode
+.pytest_cache
+__pycache__
+*.ini
+test_*.py
+conftest.py
+.env
+*.ipynb

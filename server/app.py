@@ -372,7 +372,9 @@ app = FastAPI()
 # Add CORS middleware with settings that match frontend requirements
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  
+    allow_origins=[
+        "http://localhost:3000",
+        "https://devoted-mercy-production-366f.up.railway.app",],  
     allow_credentials=True,
     allow_methods=["*"],  
     allow_headers=["*"], 

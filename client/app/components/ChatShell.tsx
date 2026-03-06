@@ -11,7 +11,6 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const SS_CONVS_KEY   = "agentui:conversations";
 const SS_MSGS_PREFIX = "agentui:messages:";
 
-// ── sessionStorage helpers ──────────────────────────────────────
 function loadConversations(): Conversation[] {
   try {
     const raw = sessionStorage.getItem(SS_CONVS_KEY);
@@ -42,41 +41,47 @@ function genId(): string {
   return Math.random().toString(36).slice(2);
 }
 
+// Hook to detect desktop vs mobile
+function useIsDesktop(): boolean {
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    setIsDesktop(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  return isDesktop;
+}
+
 export default function ChatShell() {
-  // ── Conversation state ────────────────────────────────────────
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConvId, setActiveConvId]   = useState<string | null>(null);
   const [convTitle, setConvTitle]         = useState("New Conversation");
-
-  // ── Message state ─────────────────────────────────────────────
   const [messages, setMessages]           = useState<Message[]>([]);
   const [inputValue, setInputValue]       = useState("");
   const [prefillValue, setPrefillValue]   = useState<string | undefined>();
-
-  // ── Streaming state ───────────────────────────────────────────
   const [isStreaming, setIsStreaming]      = useState(false);
   const [isThinking, setIsThinking]       = useState(false);
   const [checkpointId, setCheckpointId]   = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen]     = useState(false);
+  const isDesktop                         = useIsDesktop();
 
-  // ── Load from sessionStorage on mount ────────────────────────
   useEffect(() => {
     const saved = loadConversations();
     setConversations(saved);
   }, []);
 
-  // ── Persist conversations ─────────────────────────────────────
   useEffect(() => {
     if (conversations.length > 0) saveConversations(conversations);
   }, [conversations]);
 
-  // ── Persist messages ──────────────────────────────────────────
   useEffect(() => {
     if (activeConvId && messages.length > 0) {
       saveMessages(activeConvId, messages);
     }
   }, [messages, activeConvId]);
 
-  // ── Message helpers ───────────────────────────────────────────
   function addUserMessage(text: string): void {
     setMessages((prev) => [
       ...prev,
@@ -99,14 +104,12 @@ export default function ChatShell() {
     );
   }
 
-  // Write search query into the message so it persists after streaming
   function setMsgSearchQuery(id: string, query: string): void {
     setMessages((prev) =>
       prev.map((m) => m.id === id ? { ...m, searchQuery: query, searchUrls: [] } : m)
     );
   }
 
-  // Write search URLs into the message so they persist after streaming
   function setMsgSearchUrls(id: string, urls: string[]): void {
     setMessages((prev) =>
       prev.map((m) => m.id === id ? { ...m, searchUrls: urls } : m)
@@ -119,7 +122,6 @@ export default function ChatShell() {
     );
   }
 
-  // ── New chat ──────────────────────────────────────────────────
   function handleNewChat(): void {
     setMessages([]);
     setCheckpointId(null);
@@ -128,24 +130,23 @@ export default function ChatShell() {
     setIsStreaming(false);
     setIsThinking(false);
     setInputValue("");
+    setSidebarOpen(false);
   }
 
-  // ── Select conversation ───────────────────────────────────────
   function handleSelectConv(id: string): void {
     setActiveConvId(id);
     const conv = conversations.find((c) => c.id === id);
     if (conv) setConvTitle(conv.title);
     setMessages(loadMessages(id));
     setCheckpointId(null);
+    setSidebarOpen(false);
   }
 
-  // ── Prefill ───────────────────────────────────────────────────
   const handlePrefill = useCallback((text: string) => {
     setInputValue(text);
     setPrefillValue(text);
   }, []);
 
-  // ── Send message ──────────────────────────────────────────────
   async function handleSend(): Promise<void> {
     const text = inputValue.trim();
     if (!text || isStreaming) return;
@@ -154,7 +155,6 @@ export default function ChatShell() {
     setIsStreaming(true);
     addUserMessage(text);
 
-    // Create conversation entry on first message
     let currentConvId = activeConvId;
     if (!currentConvId) {
       const title = text.slice(0, 40) + (text.length > 40 ? "…" : "");
@@ -166,7 +166,6 @@ export default function ChatShell() {
     }
 
     setIsThinking(true);
-
     let agentMsgId: string | null = null;
 
     try {
@@ -191,21 +190,17 @@ export default function ChatShell() {
 
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
-
           let payload: SSEEvent;
           try { payload = JSON.parse(line.slice(6)); }
           catch { continue; }
 
           switch (payload.type) {
-
             case "session":
               setCheckpointId(payload.checkpoint_id);
               break;
-
             case "thinking":
               setIsThinking(true);
               break;
-
             case "content":
               if (agentMsgId === null) {
                 setIsThinking(false);
@@ -213,30 +208,21 @@ export default function ChatShell() {
               }
               appendAgentToken(agentMsgId, payload.content);
               break;
-
             case "search_start":
-              // Create the agent bubble early so the card has a home
               if (agentMsgId === null) {
                 setIsThinking(false);
                 agentMsgId = startAgentMessage();
               }
-              // Store query inside the message itself
               setMsgSearchQuery(agentMsgId, payload.query);
               break;
-
             case "search_results":
-              // Store URLs inside the message itself
               if (agentMsgId !== null) {
                 setMsgSearchUrls(agentMsgId, payload.urls ?? []);
               }
               break;
-
             case "search_error":
-              if (agentMsgId !== null) {
-                setMsgSearchUrls(agentMsgId, []);
-              }
+              if (agentMsgId !== null) setMsgSearchUrls(agentMsgId, []);
               break;
-
             case "error":
               if (agentMsgId === null) {
                 setIsThinking(false);
@@ -244,7 +230,6 @@ export default function ChatShell() {
               }
               appendAgentToken(agentMsgId, `\n\n⚠ ${payload.error}`);
               break;
-
             case "end":
               break;
           }
@@ -264,7 +249,6 @@ export default function ChatShell() {
     }
   }
 
-  // ── Render ────────────────────────────────────────────────────
   return (
     <div
       style={{
@@ -272,28 +256,66 @@ export default function ChatShell() {
         zIndex: 2,
         display: "flex",
         width: "100%",
-        height: "100vh",
+        height: "100dvh",
         overflow: "hidden",
       }}
     >
-      <Sidebar
-        conversations={conversations}
-        activeId={activeConvId}
-        onNewChat={handleNewChat}
-        onSelectConv={handleSelectConv}
-      />
+      {/* ── Mobile backdrop ──────────────────────────────────── */}
+      {!isDesktop && sidebarOpen && (
+        <div
+          id="sidebar-backdrop"
+          onClick={() => setSidebarOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.6)",
+            backdropFilter: "blur(4px)",
+            zIndex: 10,
+          }}
+        />
+      )}
 
+      {/* ── Sidebar ──────────────────────────────────────────── */}
+      <div
+        id="sidebar-drawer"
+        style={{
+          position: isDesktop ? "relative" : "fixed",
+          top: 0,
+          left: 0,
+          height: "100dvh",
+          zIndex: isDesktop ? 2 : 20,
+          transform: isDesktop || sidebarOpen
+            ? "translateX(0)"
+            : "translateX(-100%)",
+          transition: "transform 0.3s cubic-bezier(0.22, 1, 0.36, 1)",
+          flexShrink: 0,
+        }}
+      >
+        <Sidebar
+          conversations={conversations}
+          activeId={activeConvId}
+          onNewChat={handleNewChat}
+          onSelectConv={handleSelectConv}
+        />
+      </div>
+
+      {/* ── Main ─────────────────────────────────────────────── */}
       <main
         style={{
           flex: 1,
           display: "flex",
           flexDirection: "column",
-          height: "100%",
+          height: "100dvh",
           minWidth: 0,
           position: "relative",
+          // On mobile the sidebar is fixed so main takes full width
+          width: "100%",
         }}
       >
-        <TopBar title={convTitle} />
+        <TopBar
+          title={convTitle}
+          onMenuClick={() => setSidebarOpen((o) => !o)}
+        />
 
         <MessageList
           messages={messages}

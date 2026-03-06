@@ -375,7 +375,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "https://devoted-mercy-production-366f.up.railway.app",],  
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],  
     allow_headers=["*"], 
     expose_headers=["Content-Type"], 
